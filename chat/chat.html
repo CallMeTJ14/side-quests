@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Wii U Chat</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #1e1e24;
+      color: #ffffff;
+      margin: 0;
+      padding: 10px;
+    }
+    h2 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      color: #009ac7;
+    }
+    .bar {
+      background-color: #2b2b33;
+      padding: 8px;
+      margin-bottom: 10px;
+      border: 1px solid #444;
+    }
+    label {
+      font-size: 13px;
+      margin-right: 4px;
+    }
+    input[type="text"] {
+      padding: 6px;
+      font-size: 14px;
+      border: 1px solid #555;
+      background-color: #141418;
+      color: #ffffff;
+    }
+    button {
+      padding: 7px 14px;
+      font-size: 14px;
+      background-color: #009ac7;
+      color: #ffffff;
+      border: none;
+      cursor: pointer;
+    }
+    #chat-box {
+      height: 260px;
+      overflow-y: scroll;
+      background-color: #141418;
+      border: 1px solid #444;
+      padding: 8px;
+      margin-bottom: 10px;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .msg {
+      margin-bottom: 6px;
+      word-wrap: break-word;
+    }
+    .msg-user {
+      font-weight: bold;
+      color: #009ac7;
+    }
+    .msg-time {
+      font-size: 11px;
+      color: #888;
+      margin-right: 6px;
+    }
+    .status {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Wii U Chat</h2>
+
+  <div class="bar">
+    <label for="room">Room:</label>
+    <input type="text" id="room" value="my-secret-wiiu-room-123" size="22">
+    <label for="username">Name:</label>
+    <input type="text" id="username" value="Player1" size="10">
+    <button type="button" onclick="joinRoom()">Connect</button>
+    <div id="status" class="status">Not connected. Pick a secret room name and click Connect.</div>
+  </div>
+
+  <div id="chat-box"></div>
+
+  <div class="bar">
+    <input type="text" id="msg-input" placeholder="Type a message..." size="35" onkeydown="if(event.keyCode===13) sendMessage();">
+    <button type="button" onclick="sendMessage()">Send</button>
+  </div>
+
+  <script type="text/javascript">
+    var currentRoom = "";
+    var lastId = "all";
+    var pollTimer = null;
+    var seenIds = {};
+
+    function setStatus(text) {
+      document.getElementById("status").innerHTML = text;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function formatTime(unixSeconds) {
+      var d = new Date(unixSeconds * 1000);
+      var h = d.getHours();
+      var m = d.getMinutes();
+      if (h < 10) h = "0" + h;
+      if (m < 10) m = "0" + m;
+      return h + ":" + m;
+    }
+
+    function appendMessage(id, user, text, time) {
+      if (seenIds[id]) {
+        return;
+      }
+      seenIds[id] = true;
+
+      var box = document.getElementById("chat-box");
+      var div = document.createElement("div");
+      div.className = "msg";
+      div.innerHTML = '<span class="msg-time">[' + formatTime(time) + ']</span>' +
+                      '<span class="msg-user">' + escapeHtml(user) + ':</span> ' +
+                      escapeHtml(text);
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function joinRoom() {
+      var roomInput = document.getElementById("room").value.replace(/[^a-zA-Z0-9_-]/g, "");
+      if (!roomInput) {
+        setStatus("Please enter a valid room name (letters, numbers, - or _).");
+        return;
+      }
+      currentRoom = roomInput;
+      lastId = "all";
+      seenIds = {};
+      document.getElementById("chat-box").innerHTML = "";
+
+      if (pollTimer) {
+        clearInterval(pollTimer);
+      }
+
+      setStatus("Connected to room: " + currentRoom);
+      pollMessages();
+      pollTimer = setInterval(pollMessages, 3000);
+    }
+
+    function pollMessages() {
+      if (!currentRoom) return;
+
+      var xhr = new XMLHttpRequest();
+      var url = "https://ntfy.sh/" + encodeURIComponent(currentRoom) + "/json?poll=1&since=" + encodeURIComponent(lastId);
+      xhr.open("GET", url, true);
+
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+          if (xhr.status === 200) {
+            var lines = xhr.responseText.split("\n");
+            for (var i = 0; i < lines.length; i++) {
+              var line = lines[i].replace(/^\s+|\s+$/g, "");
+              if (line.length > 0) {
+                try {
+                  var data = JSON.parse(line);
+                  if (data.event === "message") {
+                    var sender = data.title ? data.title : "Anon";
+                    appendMessage(data.id, sender, data.message, data.time);
+                    lastId = data.id;
+                  }
+                } catch (e) {
+                  // Ignore malformed lines
+                }
+              }
+            }
+          } else if (xhr.status !== 0) {
+            setStatus("Connection issue (HTTP " + xhr.status + "). Retrying...");
+          }
+        }
+      };
+      xhr.send();
+    }
+
+    function sendMessage() {
+      if (!currentRoom) {
+        setStatus("Click Connect first!");
+        return;
+      }
+
+      var input = document.getElementById("msg-input");
+      var text = input.value.replace(/^\s+|\s+$/g, "");
+      var user = document.getElementById("username").value.replace(/^\s+|\s+$/g, "");
+      if (!user) user = "Anon";
+      if (!text) return;
+
+      input.value = "";
+
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", "https://ntfy.sh/", true);
+      xhr.setRequestHeader("Content-Type", "application/json");
+
+      var payload = JSON.stringify({
+        topic: currentRoom,
+        title: user,
+        message: text
+      });
+
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && xhr.status === 200) {
+          pollMessages();
+        }
+      };
+
+      xhr.send(payload);
+    }
+  </script>
+</body>
+</html>
