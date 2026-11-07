@@ -1,2 +1,2 @@
-# firefox-homepage
-a minecraft themed homepage for firefox
+# side-quests
+a website for my monthly hijinks
